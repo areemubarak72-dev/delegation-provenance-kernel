@@ -24,9 +24,41 @@ AUTHORITY = "0x1451A02b54F5ba82220185156803C1959a8407c2"
 
 ENFORCER = Enforcer(RPC_URL, POLICY)
 
+STATE_ABI = [
+    {"inputs": [], "name": "accumulator", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "modulus", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "approvedCount", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "blockedCount", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "delegationCount", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+]
+
+
 @app.route("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.route("/api/state", methods=["GET"])
+def state():
+    """Return current on-chain state from the unified contract."""
+    from web3 import Web3
+    w3 = Web3(Web3.HTTPProvider(RPC_URL))
+    contract = w3.eth.contract(
+        address=Web3.to_checksum_address(CONTRACT_ADDRESS),
+        abi=STATE_ABI,
+    )
+    try:
+        return jsonify({
+            "accumulator": str(contract.functions.accumulator().call()),
+            "modulus": str(contract.functions.modulus().call()),
+            "approvedCount": contract.functions.approvedCount().call(),
+            "blockedCount": contract.functions.blockedCount().call(),
+            "delegationCount": contract.functions.delegationCount().call(),
+            "contract": CONTRACT_ADDRESS,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/process", methods=["POST"])
 def process():
@@ -76,6 +108,7 @@ def process():
         "tx_hash": onchain["tx_hash"],
         "etherscan": f"https://sepolia.etherscan.io/tx/{onchain['tx_hash']}",
     })
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

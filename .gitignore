@@ -4,4 +4,11 @@ node_modules/
 .env
 venv/
 web3env/
+.secrets/
+*.ptau
+*.zkey
+*.wtns
+*.r1cs
+*.sym
+*.json.bak
 .DS_Store

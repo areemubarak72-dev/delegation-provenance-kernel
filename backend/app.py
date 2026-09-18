@@ -19,7 +19,7 @@ POLICY = {
 
 RPC_URL = os.environ.get("RPC_URL", "https://eth-sepolia.g.alchemy.com/v2/alch_9lH5y1pKeuJX-pgNsdrcI")
 PRIVATE_KEY = os.environ.get("PRIVATE_KEY")
-CONTRACT_ADDRESS = "0xAfbF0B58c1F9FAFf8b54A9d084A64863D93b9B4e"
+CONTRACT_ADDRESS = "0xBA97b15362196d21e138426eb7770D1DBbBc536B"
 AUTHORITY = "0x1451A02b54F5ba82220185156803C1959a8407c2"
 
 ENFORCER = Enforcer(RPC_URL, POLICY)
@@ -48,7 +48,7 @@ def process():
             onchain = emit_blocked(RPC_URL, CONTRACT_ADDRESS, PRIVATE_KEY, intent_hash, reason_hash)
             etherscan = f"https://sepolia.etherscan.io/tx/{onchain['tx_hash']}"
             tx_hash = onchain["tx_hash"]
-        except Exception as e:
+        except Exception:
             etherscan = None
             tx_hash = None
 

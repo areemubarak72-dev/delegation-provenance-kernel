@@ -5,6 +5,7 @@ ABI = [
         {"indexed": True,  "name": "authority",       "type": "address"},
         {"indexed": True,  "name": "epochCommitment", "type": "bytes32"},
         {"indexed": False, "name": "intentHash",      "type": "bytes32"},
+        {"indexed": False, "name": "accumulatorValue","type": "uint256"},
         {"indexed": False, "name": "blockNumber",     "type": "uint256"},
     ], "name": "ExecutionBound", "type": "event"},
     {"anonymous": False, "inputs": [
@@ -13,6 +14,11 @@ ABI = [
         {"indexed": False, "name": "reasonHash",  "type": "bytes32"},
         {"indexed": False, "name": "blockNumber", "type": "uint256"},
     ], "name": "ExecutionBlocked", "type": "event"},
+    {"anonymous": False, "inputs": [
+        {"indexed": False, "name": "newAccumulator", "type": "uint256"},
+        {"indexed": False, "name": "prime",          "type": "uint256"},
+        {"indexed": False, "name": "blockNumber",    "type": "uint256"},
+    ], "name": "PrimeAdded", "type": "event"},
     {"inputs": [
         {"name": "epochCommitment", "type": "bytes32"},
         {"name": "intentHash",      "type": "bytes32"},
@@ -21,6 +27,9 @@ ABI = [
         {"name": "intentHash", "type": "bytes32"},
         {"name": "reasonHash", "type": "bytes32"},
     ], "name": "recordBlocked", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+    {"inputs": [
+        {"name": "prime", "type": "uint256"},
+    ], "name": "addDelegation", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
 ]
 
 def _send(rpc_url, contract_address, private_key, fn_name, *args):
@@ -33,7 +42,7 @@ def _send(rpc_url, contract_address, private_key, fn_name, *args):
 
     tx = fn.build_transaction({
         "chainId": 11155111,
-        "gas": 200000,
+        "gas": 500000,
         "maxFeePerGas": w3.to_wei(20, "gwei"),
         "maxPriorityFeePerGas": w3.to_wei(1, "gwei"),
         "nonce": nonce,

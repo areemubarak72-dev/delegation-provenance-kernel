@@ -33,12 +33,14 @@ ABI = [
 ]
 
 def _send(rpc_url, contract_address, private_key, fn_name, *args):
-    w3 = Web3(Web3.HTTPProvider(rpc_url))
+    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 10}))
+    if w3.eth.chain_id != 11155111:
+        raise ValueError("Only Sepolia is supported")
     account = w3.eth.account.from_key(private_key)
     contract = w3.eth.contract(address=Web3.to_checksum_address(contract_address), abi=ABI)
 
     fn = getattr(contract.functions, fn_name)(*args)
-    nonce = w3.eth.get_transaction_count(account.address)
+    nonce = w3.eth.get_transaction_count(account.address, "pending")
 
     tx = fn.build_transaction({
         "chainId": 11155111,

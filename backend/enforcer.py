@@ -5,7 +5,7 @@ import time
 
 class Enforcer:
     def __init__(self, rpc_url, policy):
-        self.w3 = Web3(Web3.HTTPProvider(rpc_url))
+        self.w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 10}))
         self.policy = policy
         # policy = {
         #   "max_amount_wei": int,

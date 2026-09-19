@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 
-const API = "http://localhost:5000";
+const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export default function App() {
   const [text, setText] = useState("Send 0.1 ETH to Alice");
@@ -14,24 +14,20 @@ export default function App() {
   const [uptime, setUptime] = useState(0);
 
   async function loadState() {
-    try {
-      const [s, z] = await Promise.all([
-        axios.get(`${API}/api/state`),
-        axios.get(`${API}/api/zk-status`),
-      ]);
-      setState(s.data);
-      setZk(z.data);
-    } catch (e) {
-      setState(null);
-      setZk(null);
-    }
+    const [s, z] = await Promise.allSettled([
+      axios.get(`${API}/api/state`, { timeout: 15000 }),
+      axios.get(`${API}/api/zk-status`, { timeout: 15000 }),
+    ]);
+    setState(s.status === "fulfilled" ? s.value.data : null);
+    setZk(z.status === "fulfilled" ? z.value.data : null);
   }
 
   useEffect(() => {
-    loadState();
+    const initialLoad = setTimeout(loadState, 0);
     const i = setInterval(loadState, 10000);
     const t = setInterval(() => setUptime((u) => u + 1), 1000);
     return () => {
+      clearTimeout(initialLoad);
       clearInterval(i);
       clearInterval(t);
     };
@@ -48,49 +44,20 @@ export default function App() {
     setResult(null);
     setSteps([]);
 
-    const initialSteps = [
-      { label: "Intent", status: "pending" },
-      { label: "Policy", status: "pending" },
-      { label: "Proof", status: "pending" },
-      { label: "On-chain", status: "pending" },
-    ];
-    setSteps(initialSteps);
-
-    const setStep = (idx, status) => {
-      setSteps((prev) => {
-        const next = [...prev];
-        next[idx] = { ...next[idx], status };
-        return next;
-      });
-    };
-
-    setStep(0, "running");
-    await new Promise((r) => setTimeout(r, 400));
-    setStep(0, "done");
-
-    setStep(1, "running");
-    await new Promise((r) => setTimeout(r, 300));
-
+    const stageLabels = [["intent", "Intent"], ["policy", "Policy"], ["proof", "Proof"], ["onchain", "On-chain record"]];
+    const applyStages = (data) => setSteps(stageLabels.map(([key, label]) => ({
+      label, status: data.stages?.[key] || "not_attempted",
+    })));
+    setSteps(stageLabels.map(([, label]) => ({ label, status: "pending" })));
     try {
       const res = await axios.post(`${API}/api/process`, { text });
-
-      if (res.data.status === "blocked") {
-        setStep(1, "blocked");
-      } else {
-        setStep(1, "done");
-        setStep(2, "running");
-        await new Promise((r) => setTimeout(r, 300));
-        setStep(2, "done");
-        setStep(3, "running");
-        await new Promise((r) => setTimeout(r, 400));
-        setStep(3, "done");
-      }
-
+      applyStages(res.data);
       setResult(res.data);
       loadState();
     } catch (e) {
-      setStep(1, "blocked");
-      setResult({ status: "error", reason: e.message });
+      const data = e.response?.data || { status: "error", reason: "Request failed; processing outcome is unknown" };
+      applyStages(data);
+      setResult(data);
     }
 
     setLoading(false);
@@ -113,7 +80,7 @@ export default function App() {
           <span style={S.logoSub}>Delegation Provenance Kernel</span>
         </div>
         <div style={S.topbarRight}>
-          <span style={S.statusDot} />
+          <span style={{ ...S.statusDot, background: state ? "#4ade80" : "#64748b", boxShadow: "none" }} />
           <span style={S.statusText}>SEPOLIA</span>
           <span style={S.topbarDivider}>|</span>
           <span style={S.statusText}>{fmtUptime()}</span>
@@ -125,22 +92,22 @@ export default function App() {
         <div style={S.metricsStrip}>
           <MetricCell
             label="Constraints"
-            value={zk ? zk.circuit_constraints.toLocaleString() : "—"}
+            value={zk?.circuit_constraints != null ? zk.circuit_constraints.toLocaleString() : "—"}
             accent="#a78bfa"
           />
           <MetricCell
             label="Proof Size"
-            value={zk ? `${zk.proof_size_bytes} B` : "—"}
+            value={zk?.proof_size_bytes != null ? `${zk.proof_size_bytes} B` : "—"}
             accent="#a78bfa"
           />
           <MetricCell
-            label="Verifier"
-            value={zk?.verified_locally ? "LOCAL ✓" : "—"}
+            label="Local ZK proof"
+            value={zk?.verified_locally ? "VERIFIED" : "NOT INTEGRATED"}
             accent={zk?.verified_locally ? "#4ade80" : "#64748b"}
           />
           <MetricCell
-            label="Consensus"
-            value={zk?.verified_onchain ? "ON-CHAIN ✓" : "—"}
+            label="On-chain ZK proof"
+            value={zk?.verified_onchain ? "VERIFIED" : "NOT INTEGRATED"}
             accent={zk?.verified_onchain ? "#4ade80" : "#64748b"}
           />
           <MetricCell
@@ -165,8 +132,8 @@ export default function App() {
           {/* Left: Proof Pipeline */}
           <div style={S.panel}>
             <div style={S.panelHeader}>
-              <span style={S.panelTitle}>PROOF PIPELINE</span>
-              <span style={S.panelMeta}>real-time</span>
+              <span style={S.panelTitle}>PROCESSING RESULTS</span>
+              <span style={S.panelMeta}>reported by backend</span>
             </div>
 
             <div style={S.pipelineTiles}>
@@ -176,7 +143,7 @@ export default function App() {
                     { label: "Intent", status: "idle" },
                     { label: "Policy", status: "idle" },
                     { label: "Proof", status: "idle" },
-                    { label: "On-chain", status: "idle" },
+                    { label: "On-chain record", status: "idle" },
                   ]
               ).map((s, i) => (
                 <div
@@ -221,6 +188,9 @@ export default function App() {
                     {s.status === "running" && "●"}
                     {s.status === "idle" && "—"}
                     {s.status === "pending" && "·"}
+                    {s.status === "not_integrated" && "Not integrated"}
+                    {s.status === "not_attempted" && "Not attempted"}
+                    {s.status === "error" && "Error"}
                   </div>
                 </div>
               ))}
@@ -249,7 +219,7 @@ export default function App() {
               <div style={S.hashRow}>
                 <span style={S.hashLabel}>VERIFIER CONTRACT</span>
                 <a
-                  href={`https://sepolia.etherscan.io/address/${zk?.verifier_contract}`}
+                  href={zk?.verifier_contract ? `https://sepolia.etherscan.io/address/${zk.verifier_contract}` : undefined}
                   target="_blank"
                   rel="noreferrer"
                   style={S.externalLink}
@@ -281,7 +251,7 @@ export default function App() {
             <div style={S.stateRow}>
               <span style={S.stateKey}>Contract</span>
               <a
-                href={`https://sepolia.etherscan.io/address/${state?.contract}`}
+                href={state?.contract ? `https://sepolia.etherscan.io/address/${state.contract}` : undefined}
                 target="_blank"
                 rel="noreferrer"
                 style={S.externalLink}
@@ -302,10 +272,10 @@ export default function App() {
             </div>
 
             <div style={S.circuitBlock}>
-              <div style={S.circuitLabel}>MERKLE ROOT</div>
+              <div style={S.circuitLabel}>ACCUMULATOR</div>
               <div style={S.circuitTags}>
                 <span style={S.tag}>RSA ACCUMULATOR</span>
-                <span style={S.tag}>512-BIT</span>
+                <span style={S.tag}>EXPERIMENTAL</span>
               </div>
             </div>
           </div>
@@ -314,8 +284,8 @@ export default function App() {
         {/* Command bar */}
         <div style={S.panel}>
           <div style={S.panelHeader}>
-            <span style={S.panelTitle}>AGENT COMMAND</span>
-            <span style={S.panelMeta}>natural language</span>
+            <span style={S.panelTitle}>POLICY CHECK</span>
+            <span style={S.panelMeta}>Send &lt;amount&gt; ETH to Alice or Bob</span>
           </div>
 
           <div style={S.commandRow}>
@@ -332,7 +302,7 @@ export default function App() {
               disabled={loading}
               style={loading ? S.btnDisabled : S.btn}
             >
-              {loading ? "EXECUTING" : "EXECUTE"}
+              {loading ? "CHECKING" : "CHECK POLICY"}
             </button>
           </div>
         </div>
@@ -353,10 +323,13 @@ export default function App() {
                   color: result.status === "approved" ? "#4ade80" : "#f87171",
                 }}
               >
-                {result.status === "approved" ? "✓ APPROVED" : "✗ BLOCKED"}
+                {result.status === "approved" ? "✓ POLICY APPROVED" : result.status === "blocked" ? "✗ POLICY BLOCKED" : "REQUEST ERROR"}
               </span>
               {result.reason && <span style={S.resultReason}>{result.reason}</span>}
             </div>
+
+            <p>No ETH transfer is executed. ZK verification is not integrated.</p>
+            {result.recording_message && <p>{result.recording_message}</p>}
 
             {result.epoch_commitment && (
               <div style={S.resultRow}>

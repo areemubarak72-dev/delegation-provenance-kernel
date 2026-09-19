@@ -8,158 +8,736 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [state, setState] = useState(null);
+  const [zk, setZk] = useState(null);
+  const [steps, setSteps] = useState([]);
+  const [copied, setCopied] = useState(null);
+  const [uptime, setUptime] = useState(0);
 
   async function loadState() {
     try {
-      const res = await axios.get(`${API}/api/state`);
-      setState(res.data);
+      const [s, z] = await Promise.all([
+        axios.get(`${API}/api/state`),
+        axios.get(`${API}/api/zk-status`),
+      ]);
+      setState(s.data);
+      setZk(z.data);
     } catch (e) {
       setState(null);
+      setZk(null);
     }
   }
 
   useEffect(() => {
     loadState();
-    const interval = setInterval(loadState, 15000);
-    return () => clearInterval(interval);
+    const i = setInterval(loadState, 10000);
+    const t = setInterval(() => setUptime((u) => u + 1), 1000);
+    return () => {
+      clearInterval(i);
+      clearInterval(t);
+    };
   }, []);
+
+  async function copyToClipboard(value, key) {
+    await navigator.clipboard.writeText(value);
+    setCopied(key);
+    setTimeout(() => setCopied(null), 1500);
+  }
 
   async function submit() {
     setLoading(true);
     setResult(null);
+    setSteps([]);
+
+    const initialSteps = [
+      { label: "Intent", status: "pending" },
+      { label: "Policy", status: "pending" },
+      { label: "Proof", status: "pending" },
+      { label: "On-chain", status: "pending" },
+    ];
+    setSteps(initialSteps);
+
+    const setStep = (idx, status) => {
+      setSteps((prev) => {
+        const next = [...prev];
+        next[idx] = { ...next[idx], status };
+        return next;
+      });
+    };
+
+    setStep(0, "running");
+    await new Promise((r) => setTimeout(r, 400));
+    setStep(0, "done");
+
+    setStep(1, "running");
+    await new Promise((r) => setTimeout(r, 300));
+
     try {
       const res = await axios.post(`${API}/api/process`, { text });
+
+      if (res.data.status === "blocked") {
+        setStep(1, "blocked");
+      } else {
+        setStep(1, "done");
+        setStep(2, "running");
+        await new Promise((r) => setTimeout(r, 300));
+        setStep(2, "done");
+        setStep(3, "running");
+        await new Promise((r) => setTimeout(r, 400));
+        setStep(3, "done");
+      }
+
       setResult(res.data);
       loadState();
     } catch (e) {
+      setStep(1, "blocked");
       setResult({ status: "error", reason: e.message });
     }
+
     setLoading(false);
   }
 
+  const fmtUptime = () => {
+    const h = Math.floor(uptime / 3600);
+    const m = Math.floor((uptime % 3600) / 60);
+    const s = uptime % 60;
+    return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
   return (
-    <div style={{ minHeight: "100vh", background: "#0f172a", color: "#e2e8f0", padding: 24, fontFamily: "system-ui" }}>
-      <div style={{ maxWidth: 800, margin: "0 auto" }}>
-        <h1 style={{ fontSize: 36, fontWeight: "bold", textAlign: "center", marginBottom: 8, color: "#60a5fa" }}>
-          Delegation Provenance Kernel
-        </h1>
-        <p style={{ textAlign: "center", color: "#94a3b8", marginBottom: 32 }}>
-          Bind every AI-agent transaction to a verifiable EIP-7702 delegation epoch.
-        </p>
+    <div style={S.root}>
+      {/* Top status bar */}
+      <div style={S.topbar}>
+        <div style={S.topbarLeft}>
+          <span style={S.logo}>◆</span>
+          <span style={S.logoText}>DPK</span>
+          <span style={S.logoSub}>Delegation Provenance Kernel</span>
+        </div>
+        <div style={S.topbarRight}>
+          <span style={S.statusDot} />
+          <span style={S.statusText}>SEPOLIA</span>
+          <span style={S.topbarDivider}>|</span>
+          <span style={S.statusText}>{fmtUptime()}</span>
+        </div>
+      </div>
 
-        {state && (
-          <div style={{ marginBottom: 24, padding: 20, background: "#1e293b", border: "1px solid #334155", borderRadius: 12 }}>
-            <h2 style={{ fontSize: 14, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 16 }}>
-              On-Chain State
-            </h2>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 16 }}>
-              <Stat label="Approved" value={state.approvedCount} color="#4ade80" />
-              <Stat label="Blocked" value={state.blockedCount} color="#f87171" />
-              <Stat label="Delegations" value={state.delegationCount} color="#60a5fa" />
-              <Stat label="Modulus bits" value="256" color="#c084fc" />
-            </div>
-            <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #334155" }}>
-              <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4 }}>RSA Accumulator</div>
-              <div style={{ fontFamily: "monospace", fontSize: 11, wordBreak: "break-all", color: "#cbd5e1" }}>
-                {state.accumulator}
-              </div>
-            </div>
-            <div style={{ marginTop: 8, fontSize: 12 }}>
-              <a
-                href={`https://sepolia.etherscan.io/address/${state.contract}`}
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: "#60a5fa", textDecoration: "none" }}
-              >
-                View contract on Sepolia Etherscan →
-              </a>
-            </div>
-          </div>
-        )}
-
-        <div style={{ background: "#1e293b", borderRadius: 12, padding: 24, border: "1px solid #334155" }}>
-          <label style={{ display: "block", fontSize: 13, color: "#94a3b8", marginBottom: 8 }}>
-            AI Agent Transaction Request
-          </label>
-          <input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            style={{
-              width: "100%", background: "#0f172a", border: "1px solid #475569",
-              borderRadius: 8, padding: "12px 16px", fontSize: 16, color: "#e2e8f0", boxSizing: "border-box"
-            }}
+      <div style={S.container}>
+        {/* Metrics strip - Blockstream style */}
+        <div style={S.metricsStrip}>
+          <MetricCell
+            label="Constraints"
+            value={zk ? zk.circuit_constraints.toLocaleString() : "—"}
+            accent="#a78bfa"
           />
-          <button
-            onClick={submit}
-            disabled={loading}
-            style={{
-              marginTop: 16, width: "100%",
-              background: loading ? "#334155" : "#2563eb",
-              color: "white", border: "none", borderRadius: 8, padding: "14px 0",
-              fontSize: 16, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer"
-            }}
-          >
-            {loading ? "Processing…" : "Submit"}
-          </button>
+          <MetricCell
+            label="Proof Size"
+            value={zk ? `${zk.proof_size_bytes} B` : "—"}
+            accent="#a78bfa"
+          />
+          <MetricCell
+            label="Verifier"
+            value={zk?.verified_locally ? "LOCAL ✓" : "—"}
+            accent={zk?.verified_locally ? "#4ade80" : "#64748b"}
+          />
+          <MetricCell
+            label="Consensus"
+            value={zk?.verified_onchain ? "ON-CHAIN ✓" : "—"}
+            accent={zk?.verified_onchain ? "#4ade80" : "#64748b"}
+          />
+          <MetricCell
+            label="Delegations"
+            value={state ? state.delegationCount : "—"}
+            accent="#60a5fa"
+          />
+          <MetricCell
+            label="Approved"
+            value={state ? state.approvedCount : "—"}
+            accent="#4ade80"
+          />
+          <MetricCell
+            label="Blocked"
+            value={state ? state.blockedCount : "—"}
+            accent="#f87171"
+          />
         </div>
 
-        {result && (
-          <div style={{
-            marginTop: 24, borderRadius: 12, padding: 24,
-            background: result.status === "approved" ? "rgba(22,101,52,0.3)" : "rgba(127,29,29,0.3)",
-            border: `1px solid ${result.status === "approved" ? "#166534" : "#991b1b"}`
-          }}>
-            <div style={{
-              fontSize: 20, fontWeight: "bold", marginBottom: 16,
-              color: result.status === "approved" ? "#4ade80" : "#f87171"
-            }}>
-              {result.status === "approved" ? "✓ APPROVED" : "✗ BLOCKED"}
+        {/* Main grid - two columns */}
+        <div style={S.grid}>
+          {/* Left: Proof Pipeline */}
+          <div style={S.panel}>
+            <div style={S.panelHeader}>
+              <span style={S.panelTitle}>PROOF PIPELINE</span>
+              <span style={S.panelMeta}>real-time</span>
             </div>
 
-            {result.reason && <div style={{ color: "#cbd5e1", marginBottom: 12 }}>Reason: {result.reason}</div>}
+            <div style={S.pipelineTiles}>
+              {(steps.length > 0
+                ? steps
+                : [
+                    { label: "Intent", status: "idle" },
+                    { label: "Policy", status: "idle" },
+                    { label: "Proof", status: "idle" },
+                    { label: "On-chain", status: "idle" },
+                  ]
+              ).map((s, i) => (
+                <div
+                  key={i}
+                  style={{
+                    ...S.tile,
+                    background:
+                      s.status === "done"
+                        ? "rgba(74,222,128,0.15)"
+                        : s.status === "blocked"
+                        ? "rgba(248,113,113,0.15)"
+                        : s.status === "running"
+                        ? "rgba(96,165,250,0.15)"
+                        : "rgba(71,85,105,0.1)",
+                    borderColor:
+                      s.status === "done"
+                        ? "#4ade80"
+                        : s.status === "blocked"
+                        ? "#f87171"
+                        : s.status === "running"
+                        ? "#60a5fa"
+                        : "#334155",
+                  }}
+                >
+                  <div style={S.tileIndex}>0{i + 1}</div>
+                  <div style={S.tileLabel}>{s.label}</div>
+                  <div
+                    style={{
+                      ...S.tileStatus,
+                      color:
+                        s.status === "done"
+                          ? "#4ade80"
+                          : s.status === "blocked"
+                          ? "#f87171"
+                          : s.status === "running"
+                          ? "#60a5fa"
+                          : "#64748b",
+                    }}
+                  >
+                    {s.status === "done" && "✓"}
+                    {s.status === "blocked" && "✗"}
+                    {s.status === "running" && "●"}
+                    {s.status === "idle" && "—"}
+                    {s.status === "pending" && "·"}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={S.panelDivider} />
+
+            <div style={S.hashBlock}>
+              <div style={S.hashRow}>
+                <span style={S.hashLabel}>PROOF HASH</span>
+                {zk?.proof_hash ? (
+                  <button
+                    style={S.copyBtn}
+                    onClick={() => copyToClipboard(zk.proof_hash, "proof")}
+                  >
+                    {copied === "proof" ? "COPIED" : "COPY"}
+                  </button>
+                ) : null}
+              </div>
+              <code style={S.hashValue}>
+                {zk?.proof_hash || "—"}
+              </code>
+            </div>
+
+            <div style={S.hashBlock}>
+              <div style={S.hashRow}>
+                <span style={S.hashLabel}>VERIFIER CONTRACT</span>
+                <a
+                  href={`https://sepolia.etherscan.io/address/${zk?.verifier_contract}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={S.externalLink}
+                >
+                  ETHERSCAN ↗
+                </a>
+              </div>
+              <code style={S.hashValue}>{zk?.verifier_contract || "—"}</code>
+            </div>
+          </div>
+
+          {/* Right: Network State */}
+          <div style={S.panel}>
+            <div style={S.panelHeader}>
+              <span style={S.panelTitle}>NETWORK STATE</span>
+              <span style={S.panelMeta}>Sepolia</span>
+            </div>
+
+            <div style={S.stateRow}>
+              <span style={S.stateKey}>RSA Modulus</span>
+              <span style={S.stateVal}>{state?.modulus?.slice(0, 24)}…</span>
+            </div>
+
+            <div style={S.stateRow}>
+              <span style={S.stateKey}>Accumulator</span>
+              <span style={S.stateVal}>{state?.accumulator?.slice(0, 24)}…</span>
+            </div>
+
+            <div style={S.stateRow}>
+              <span style={S.stateKey}>Contract</span>
+              <a
+                href={`https://sepolia.etherscan.io/address/${state?.contract}`}
+                target="_blank"
+                rel="noreferrer"
+                style={S.externalLink}
+              >
+                {state?.contract?.slice(0, 14)}… ↗
+              </a>
+            </div>
+
+            <div style={S.panelDivider} />
+
+            <div style={S.circuitBlock}>
+              <div style={S.circuitLabel}>CIRCUIT</div>
+              <div style={S.circuitTags}>
+                <span style={S.tag}>CIRCOM 2.0</span>
+                <span style={S.tag}>GROTH16</span>
+                <span style={S.tag}>BN128</span>
+              </div>
+            </div>
+
+            <div style={S.circuitBlock}>
+              <div style={S.circuitLabel}>MERKLE ROOT</div>
+              <div style={S.circuitTags}>
+                <span style={S.tag}>RSA ACCUMULATOR</span>
+                <span style={S.tag}>512-BIT</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Command bar */}
+        <div style={S.panel}>
+          <div style={S.panelHeader}>
+            <span style={S.panelTitle}>AGENT COMMAND</span>
+            <span style={S.panelMeta}>natural language</span>
+          </div>
+
+          <div style={S.commandRow}>
+            <span style={S.prompt}>$</span>
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !loading && submit()}
+              style={S.input}
+              disabled={loading}
+            />
+            <button
+              onClick={submit}
+              disabled={loading}
+              style={loading ? S.btnDisabled : S.btn}
+            >
+              {loading ? "EXECUTING" : "EXECUTE"}
+            </button>
+          </div>
+        </div>
+
+        {/* Result */}
+        {result && (
+          <div
+            style={{
+              ...S.result,
+              borderColor:
+                result.status === "approved" ? "#166534" : "#991b1b",
+            }}
+          >
+            <div style={S.resultHeader}>
+              <span
+                style={{
+                  ...S.resultStatus,
+                  color: result.status === "approved" ? "#4ade80" : "#f87171",
+                }}
+              >
+                {result.status === "approved" ? "✓ APPROVED" : "✗ BLOCKED"}
+              </span>
+              {result.reason && <span style={S.resultReason}>{result.reason}</span>}
+            </div>
 
             {result.epoch_commitment && (
-              <div style={{ fontSize: 13, marginBottom: 8 }}>
-                <div style={{ color: "#94a3b8" }}>Epoch commitment:</div>
-                <div style={{ fontFamily: "monospace", fontSize: 11, wordBreak: "break-all", color: "#e2e8f0" }}>
-                  {result.epoch_commitment}
-                </div>
+              <div style={S.resultRow}>
+                <span style={S.resultKey}>EPOCH</span>
+                <code style={S.resultVal}>{result.epoch_commitment}</code>
               </div>
             )}
 
             {result.intent_hash && (
-              <div style={{ fontSize: 13, marginBottom: 8 }}>
-                <div style={{ color: "#94a3b8" }}>Intent hash:</div>
-                <div style={{ fontFamily: "monospace", fontSize: 11, wordBreak: "break-all", color: "#e2e8f0" }}>
-                  {result.intent_hash}
-                </div>
+              <div style={S.resultRow}>
+                <span style={S.resultKey}>INTENT</span>
+                <code style={S.resultVal}>{result.intent_hash}</code>
               </div>
             )}
 
             {result.etherscan && (
-              <a href={result.etherscan} target="_blank" rel="noreferrer"
-                 style={{ display: "inline-block", marginTop: 16, color: "#60a5fa" }}>
-                View on Sepolia Etherscan →
+              <a
+                href={result.etherscan}
+                target="_blank"
+                rel="noreferrer"
+                style={S.resultLink}
+              >
+                VIEW TRANSACTION ON ETHERSCAN ↗
               </a>
             )}
           </div>
         )}
 
-        <div style={{ marginTop: 32, paddingTop: 24, borderTop: "1px solid #334155", fontSize: 12, color: "#64748b", textAlign: "center" }}>
-          RSA accumulator + zero-knowledge proofs · EIP-7702 delegation provenance
+        {/* Footer */}
+        <div style={S.footer}>
+          <span>RSA ACCUMULATOR</span>
+          <span style={S.footerSep}>·</span>
+          <span>GROTH16 PROOFS</span>
+          <span style={S.footerSep}>·</span>
+          <span>EIP-7702</span>
+          <span style={S.footerSep}>·</span>
+          <span>SEPOLIA TESTNET</span>
         </div>
       </div>
     </div>
   );
 }
 
-function Stat({ label, value, color }) {
+function MetricCell({ label, value, accent }) {
   return (
-    <div style={{ textAlign: "center" }}>
-      <div style={{ fontSize: 28, fontWeight: "bold", color }}>{value}</div>
-      <div style={{ fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginTop: 4 }}>
-        {label}
-      </div>
+    <div style={S.metricCell}>
+      <div style={S.metricLabel}>{label}</div>
+      <div style={{ ...S.metricValue, color: accent }}>{value}</div>
     </div>
   );
 }
+
+const S = {
+  root: {
+    minHeight: "100vh",
+    background: "#0a0e1a",
+    color: "#cbd5e1",
+    fontFamily:
+      "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    fontSize: 13,
+  },
+  topbar: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "12px 24px",
+    borderBottom: "1px solid #1e2537",
+    background: "#0d1220",
+  },
+  topbarLeft: { display: "flex", alignItems: "center", gap: 12 },
+  logo: { color: "#a78bfa", fontSize: 18 },
+  logoText: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontWeight: 700,
+    letterSpacing: 2,
+    fontSize: 13,
+    color: "#f1f5f9",
+  },
+  logoSub: {
+    fontSize: 11,
+    color: "#64748b",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    paddingLeft: 12,
+    borderLeft: "1px solid #1e2537",
+  },
+  topbarRight: { display: "flex", alignItems: "center", gap: 10 },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    background: "#4ade80",
+    boxShadow: "0 0 8px #4ade80",
+  },
+  statusText: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11,
+    color: "#64748b",
+    letterSpacing: 1,
+  },
+  topbarDivider: { color: "#1e2537" },
+  container: { maxWidth: 1200, margin: "0 auto", padding: "24px" },
+  metricsStrip: {
+    display: "grid",
+    gridTemplateColumns: "repeat(7, 1fr)",
+    background: "#0d1220",
+    border: "1px solid #1e2537",
+    borderRadius: 6,
+    overflow: "hidden",
+    marginBottom: 20,
+  },
+  metricCell: {
+    padding: "14px 16px",
+    borderRight: "1px solid #1e2537",
+  },
+  metricLabel: {
+    fontSize: 10,
+    color: "#64748b",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    marginBottom: 6,
+  },
+  metricValue: {
+    fontSize: 16,
+    fontWeight: 600,
+    fontVariantNumeric: "tabular-nums",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "1.2fr 1fr",
+    gap: 20,
+    marginBottom: 20,
+  },
+  panel: {
+    background: "#0d1220",
+    border: "1px solid #1e2537",
+    borderRadius: 6,
+    padding: 20,
+    marginBottom: 20,
+  },
+  panelHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottom: "1px solid #1e2537",
+  },
+  panelTitle: {
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: 2,
+    color: "#94a3b8",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  panelMeta: {
+    fontSize: 10,
+    color: "#475569",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  pipelineTiles: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr 1fr 1fr",
+    gap: 8,
+    marginBottom: 16,
+  },
+  tile: {
+    padding: "12px 10px",
+    border: "1px solid",
+    borderRadius: 4,
+    textAlign: "center",
+    transition: "all 0.3s",
+  },
+  tileIndex: {
+    fontSize: 9,
+    color: "#475569",
+    fontFamily: "'JetBrains Mono', monospace",
+    marginBottom: 4,
+  },
+  tileLabel: {
+    fontSize: 11,
+    color: "#cbd5e1",
+    fontWeight: 500,
+    marginBottom: 6,
+  },
+  tileStatus: {
+    fontSize: 14,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  panelDivider: { height: 1, background: "#1e2537", margin: "16px 0" },
+  hashBlock: { marginBottom: 14 },
+  hashRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  hashLabel: {
+    fontSize: 10,
+    color: "#475569",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  copyBtn: {
+    padding: "2px 8px",
+    background: "transparent",
+    border: "1px solid #334155",
+    color: "#94a3b8",
+    borderRadius: 3,
+    fontSize: 9,
+    letterSpacing: 1,
+    fontWeight: 600,
+    cursor: "pointer",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  hashValue: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11,
+    color: "#94a3b8",
+    wordBreak: "break-all",
+    lineHeight: 1.5,
+    display: "block",
+  },
+  externalLink: {
+    fontSize: 10,
+    color: "#a78bfa",
+    textDecoration: "none",
+    letterSpacing: 1,
+    fontFamily: "'JetBrains Mono', monospace",
+    fontWeight: 600,
+  },
+  stateRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "10px 0",
+    borderBottom: "1px solid #131a2c",
+  },
+  stateKey: {
+    fontSize: 11,
+    color: "#475569",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  stateVal: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11,
+    color: "#94a3b8",
+  },
+  circuitBlock: { marginBottom: 12 },
+  circuitLabel: {
+    fontSize: 10,
+    color: "#475569",
+    letterSpacing: 1,
+    marginBottom: 8,
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  circuitTags: { display: "flex", gap: 6, flexWrap: "wrap" },
+  tag: {
+    padding: "3px 8px",
+    background: "rgba(167,139,250,0.08)",
+    border: "1px solid rgba(167,139,250,0.2)",
+    color: "#a78bfa",
+    borderRadius: 3,
+    fontSize: 10,
+    fontWeight: 600,
+    letterSpacing: 0.8,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  commandRow: {
+    display: "flex",
+    alignItems: "center",
+    background: "#0a0e1a",
+    border: "1px solid #1e2537",
+    borderRadius: 4,
+    padding: "4px 4px 4px 16px",
+  },
+  prompt: {
+    color: "#a78bfa",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 14,
+    marginRight: 10,
+    fontWeight: 700,
+  },
+  input: {
+    flex: 1,
+    background: "transparent",
+    border: "none",
+    outline: "none",
+    color: "#f1f5f9",
+    fontSize: 14,
+    fontFamily: "'JetBrains Mono', monospace",
+    padding: "12px 0",
+  },
+  btn: {
+    padding: "12px 24px",
+    background: "#7c3aed",
+    color: "white",
+    border: "none",
+    borderRadius: 3,
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: 1.5,
+    cursor: "pointer",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  btnDisabled: {
+    padding: "12px 24px",
+    background: "#1e2537",
+    color: "#475569",
+    border: "none",
+    borderRadius: 3,
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: 1.5,
+    cursor: "not-allowed",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  result: {
+    padding: 20,
+    border: "1px solid",
+    borderRadius: 6,
+    background: "#0d1220",
+    marginBottom: 20,
+  },
+  resultHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  resultStatus: {
+    fontSize: 14,
+    fontWeight: 700,
+    letterSpacing: 1.5,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  resultReason: { fontSize: 12, color: "#94a3b8" },
+  resultRow: {
+    display: "flex",
+    gap: 16,
+    padding: "8px 0",
+    borderBottom: "1px solid #131a2c",
+  },
+  resultKey: {
+    fontSize: 10,
+    color: "#475569",
+    letterSpacing: 1,
+    width: 80,
+    flexShrink: 0,
+    paddingTop: 2,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  resultVal: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11,
+    color: "#94a3b8",
+    wordBreak: "break-all",
+  },
+  resultLink: {
+    display: "inline-block",
+    marginTop: 12,
+    fontSize: 11,
+    color: "#a78bfa",
+    textDecoration: "none",
+    letterSpacing: 1,
+    fontWeight: 600,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  footer: {
+    textAlign: "center",
+    fontSize: 10,
+    color: "#334155",
+    letterSpacing: 2,
+    fontFamily: "'JetBrains Mono', monospace",
+    paddingTop: 20,
+    borderTop: "1px solid #1e2537",
+  },
+  footerSep: { margin: "0 12px", color: "#1e2537" },
+};
